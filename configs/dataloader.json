@@ -1,0 +1,15 @@
+{
+    "data_path": ".../file_path.csv",
+    "file_type": "csv",
+    "use_cols": ["Id", "ProductId", "UserId", "ProfileName", "HelpfulnessNumerator",
+                    "HelpfulnessDenominator", "Score", "Time", "Summary", "Text"],
+    "patterns": {
+        "remove_characters": "[\"'.,!?;:]",
+        "remove_parentheses": "\\(.*?\\)",
+        "remove_extra_whitespace": "\\s+"
+    },
+    "fillna": {
+        "Summary": ""
+    },
+    "drop_duplicates": true
+}
