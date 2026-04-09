@@ -1,0 +1,17 @@
+[project]
+name = "amazon-product-recommender"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "janse755",email = "tycho.jansen@kpn.com"}
+]
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pandas (>=3.0.2,<4.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
