@@ -1,10 +1,11 @@
 """Negative sampler for contrastive learning in recommendation systems.
 
-This module provides the NegativeSampler class for sampling negative items
-(products a user has not interacted with) during training.
+This module provides the NegativeSampler class for efficiently sampling negative
+items (products a user has not interacted with) during training, with support
+for both uniform and popularity-based sampling strategies.
 """
 
-from typing import Dict, Set
+from typing import Dict, Optional, Set
 
 import numpy as np
 
@@ -12,33 +13,37 @@ import numpy as np
 class NegativeSampler:
     """Sample negative items for contrastive learning.
 
-    Ensures sampled items are not in the user's positive interaction set to
-    maintain meaningful contrastive pairs during training.
+    Supports both uniform and popularity-based negative sampling. Efficiently
+    filters products the user has already interacted with.
     """
 
-    def __init__(self, num_products: int, user_product_dict: Dict[int, Set[int]], n_negatives: int = 3) -> None:
+    def __init__(
+        self,
+        num_products: int,
+        user_product_dict: Dict[int, Set[int]],
+        popularity: Optional[np.ndarray] = None,
+    ) -> None:
         """Initialize the negative sampler.
-
-        Pre-computes unseen items for each user for efficient sampling.
 
         Args:
             num_products: Total number of unique product indices.
             user_product_dict: Dictionary mapping user indices to sets of
                 product indices they have interacted with.
-            n_negatives: Number of negative samples per user. Default is 3.
+            popularity: Optional item popularity distribution for weighted sampling.
+                Default is None (uniform sampling).
         """
         self.num_products: int = num_products
         self.user_product_dict: Dict[int, Set[int]] = user_product_dict
-        self.n_negatives: int = n_negatives
-        self.all_items: np.ndarray = np.arange(num_products)
 
-        # Pre-compute unseen items for each user
-        self.unseen_items: Dict[int, np.ndarray] = {
-            u: np.array(list(set(range(num_products)) - s), dtype=np.int32) for u, s in user_product_dict.items()
-        }
+        self.all_items: np.ndarray = np.arange(num_products, dtype=np.int32)
 
-    def sample(self, user_id: int) -> int:
-        """Sample a single negative item for the given user.
+        self.popularity: Optional[np.ndarray] = None
+        if popularity is not None:
+            popularity = popularity.astype(np.float64)
+            self.popularity = popularity / popularity.sum()
+
+    def sample_uniform(self, user_id: int) -> int:
+        """Sample a random negative item uniformly.
 
         Args:
             user_id: The user index to sample a negative item for.
@@ -46,29 +51,53 @@ class NegativeSampler:
         Returns:
             The product index of a negative item.
         """
-        candidates = self.unseen_items.get(user_id)
-        if candidates is None or len(candidates) == 0:
-            return int(np.random.choice(self.all_items))
-        return int(np.random.choice(candidates))
+        seen = self.user_product_dict.get(user_id, set())
 
-    def batch_sample(self, user_ids: np.ndarray) -> np.ndarray:
+        while True:
+            neg = np.random.randint(0, self.num_products)
+            if neg not in seen:
+                return int(neg)
+
+    def sample_popularity(self, user_id: int) -> int:
+        """Sample a negative item weighted by item popularity.
+
+        Uses the popularity distribution if provided, otherwise falls back
+        to uniform sampling.
+
+        Args:
+            user_id: The user index to sample a negative item for.
+
+        Returns:
+            The product index of a negative item.
+        """
+        seen = self.user_product_dict.get(user_id, set())
+
+        while True:
+            if self.popularity is None:
+                neg = np.random.randint(0, self.num_products)
+            else:
+                neg = np.random.choice(self.all_items, p=self.popularity)
+
+            if neg not in seen:
+                return int(neg)
+
+    def batch_sample(self, user_ids: np.ndarray, mode: str = "uniform") -> np.ndarray:
         """Sample negative items for a batch of users.
 
         Args:
             user_ids: Array of user indices.
+            mode: Sampling mode, either 'uniform' or 'popularity'.
+                Default is 'uniform'.
 
         Returns:
-            Array of shape (len(user_ids), n_negatives) with negative product indices.
+            Array of shape (batch_size,) with negative product indices.
         """
-        negatives = []
-        for u in user_ids:
-            candidates = self.unseen_items.get(u)
-            if candidates is None or len(candidates) == 0:
-                # Sample with replacement if no unseen items
-                negs = np.random.choice(self.all_items, size=self.n_negatives, replace=True)
+        negatives = np.empty(len(user_ids), dtype=np.int32)
+
+        for i, u in enumerate(user_ids):
+            if mode == "popularity":
+                negatives[i] = self.sample_popularity(u)
             else:
-                # Sample with replacement only if needed
-                replace = len(candidates) < self.n_negatives
-                negs = np.random.choice(candidates, size=self.n_negatives, replace=replace)
-            negatives.append(negs)
-        return np.array(negatives)
+                negatives[i] = self.sample_uniform(u)
+
+        return negatives

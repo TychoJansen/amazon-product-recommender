@@ -58,8 +58,10 @@ class IdMapper:
         """
         df = df.copy()
 
-        df["user_idx"] = df["userid"].map(lambda x: self.user2idx.get(x, self.unk_user_id))
-        df["product_idx"] = df["productid"].map(lambda x: self.product2idx.get(x, self.unk_product_id))
+        df["user_idx"] = df["userid"].map(self.user2idx).fillna(self.unk_user_id).astype(int)
+
+        df["product_idx"] = df["productid"].map(self.product2idx).fillna(self.unk_product_id).astype(int)
+
         return df
 
     @staticmethod
@@ -75,4 +77,4 @@ class IdMapper:
             Dictionary where keys are user indices and values are sets of
             product indices that the user has interacted with.
         """
-        return df.groupby("user_idx")["product_idx"].apply(set).to_dict()
+        return df.groupby("user_idx")["product_idx"].agg(set).to_dict()

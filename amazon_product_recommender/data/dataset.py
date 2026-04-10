@@ -6,7 +6,6 @@ user-positive-negative triples used in contrastive learning.
 
 from typing import Any, Dict
 
-import numpy as np
 import torch
 from data.samplers import NegativeSampler
 from torch.utils.data import Dataset
@@ -46,7 +45,7 @@ class InteractionDataset(Dataset):
         """
         user = self.user_ids[idx]
         pos = self.product_ids[idx]
-        neg = self.sampler.batch_sample(np.array([int(user)]))[0]
+        neg = self.sampler.sample_popularity(user.item())
         return {
             "user_id": user,
             "pos_item": pos,
