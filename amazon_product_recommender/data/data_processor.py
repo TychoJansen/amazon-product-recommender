@@ -1,7 +1,7 @@
 r"""DataProcessor: A configurable class for preprocessing tabular data.
 
 This class performs basic data cleaning, handles missing values, drops unused columns, preprocesses
-string columns, lowers column names, and removes duplicates when configured.
+string and datetime columns, lowers column names, and removes duplicates when configured.
 
 Designed for flexible ETL workflows, with all options controlled via the config
 dictionary or JSON file.
@@ -52,8 +52,10 @@ class DataProcessor:
         """Run the preprocessing pipeline and return the processed DataFrame."""
         self._fill_missing_values()
         self._drop_unused_columns()
-        self._lowercase_col_names()
         self._preprocess_string_cols()
+        self._convert_datetime_columns()
+        self._sort_by_time()
+        self._lowercase_col_names()
         self._drop_duplicates()
         return self.df
 
@@ -78,16 +80,10 @@ class DataProcessor:
             if col in self.df.columns:
                 self.df[col] = self.df[col].fillna(value)
 
-    def _lowercase_col_names(self) -> None:
-        """Convert all DataFrame column names to lowercase."""
-        if self.df is None:
-            return
-        self.df.columns = [col.lower() for col in self.df.columns]
-
     def _preprocess_string_cols(self) -> None:
         """Preprocess string columns by cleaning whitespace, quotes, and parentheses."""
         patterns = self.config["patterns"]
-        # Pre-compile regex patterns for efficiency
+
         compiled_patterns = [
             (name, re.compile(pattern)) for name, pattern in patterns.items() if pattern  # Skip empty patterns
         ]
@@ -102,6 +98,52 @@ class DataProcessor:
 
         for col in self.df.select_dtypes(include="object").columns:
             self.df[col] = self.df[col].apply(clean_text)
+
+    def _convert_datetime_columns(self) -> None:
+        """Convert configured columns to pandas datetime format.
+
+        Supports:
+        - Unix timestamps (seconds or milliseconds)
+        - ISO date strings
+        - Mixed safe conversion
+
+        Config:
+            datetime_cols: list of column names to convert
+        """
+        cols = self.config.get("datetime_cols", [])
+
+        for col in cols:
+            if col not in self.df.columns:
+                continue
+
+            series = self.df[col]
+            # numeric (unix timestamp)
+            if pd.api.types.is_numeric_dtype(series):
+                # auto-detect seconds vs milliseconds
+                if series.max() > 1e12:
+                    self.df[col] = pd.to_datetime(series, unit="ms", errors="coerce")
+                else:
+                    self.df[col] = pd.to_datetime(series, unit="s", errors="coerce")
+                self.df[col] = self.df[col].dt.strftime("%Y-%m-%d %H:%M:%S")
+
+            # string / object
+            else:
+                self.df[col] = pd.to_datetime(series, errors="coerce")
+
+    def _sort_by_time(self) -> None:
+        """Sort the DataFrame by the configured datetime column."""
+        sort_col = self.config.get("sort_col", None)
+        datetime_cols = self.config.get("datetime_cols", None)
+        if sort_col:
+            self.df = self.df.sort_values(sort_col)
+        elif datetime_cols and len(datetime_cols) == 1:
+            self.df = self.df.sort_values(datetime_cols[0])
+
+    def _lowercase_col_names(self) -> None:
+        """Convert all DataFrame column names to lowercase."""
+        if self.df is None:
+            return
+        self.df.columns = [col.lower() for col in self.df.columns]
 
     def _drop_duplicates(self) -> None:
         """Drop duplicate rows if the configuration enables duplicate removal."""

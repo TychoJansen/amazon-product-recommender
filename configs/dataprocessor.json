@@ -1,8 +1,8 @@
 {
-    "use_cols": ["Id", "ProductId", "UserId", "ProfileName", "HelpfulnessNumerator",
-                    "HelpfulnessDenominator", "Score", "Time", "Summary", "Text"],
+    "use_cols": ["Id", "ProductId", "UserId", "ProfileName", "HelpfulnessNumerator", "HelpfulnessDenominator", "Score", "Time", "Summary", "Text"],
+    "datetime_cols": ["Time"],
+    "sort_col": "Time",
     "patterns": {
-        "remove_characters": "",
         "remove_tags": "<.*?>",
         "remove_extra_whitespace": "\\s+"
     },
