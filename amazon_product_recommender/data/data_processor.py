@@ -124,7 +124,6 @@ class DataProcessor:
                     self.df[col] = pd.to_datetime(series, unit="ms", errors="coerce")
                 else:
                     self.df[col] = pd.to_datetime(series, unit="s", errors="coerce")
-                self.df[col] = self.df[col].dt.strftime("%Y-%m-%d %H:%M:%S")
 
             # string / object
             else:
