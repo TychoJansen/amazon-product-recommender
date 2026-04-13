@@ -12,42 +12,52 @@ from torch.utils.data import Dataset
 
 
 class InteractionDataset(Dataset):
-    """Create triplets of user, positive, and negative items for training.
+    """Dataset yielding (user, positive, negatives) samples."""
 
-    Yields triplets: (user, positive_item, negative_items) where negative items
-    are sampled from products the user has not interacted with.
-    """
-
-    def __init__(self, user_ids: Any, product_ids: Any, sampler: NegativeSampler) -> None:
-        """Initialize the interaction dataset.
+    def __init__(
+        self,
+        user_ids: Any,
+        item_ids: Any,
+        sampler: NegativeSampler,
+        num_negatives: int = 1,
+    ) -> None:
+        """Initialize dataset.
 
         Args:
-            user_ids: Array of user indices.
-            product_ids: Array of product indices (positive items).
-            sampler: NegativeSampler instance for sampling negative items.
+            user_ids: Array-like user indices.
+            item_ids: Array-like positive item indices.
+            sampler: NegativeSampler instance.
+            num_negatives: Number of negatives per sample.
         """
-        self.user_ids: torch.Tensor = torch.tensor(user_ids, dtype=torch.long)
-        self.product_ids: torch.Tensor = torch.tensor(product_ids, dtype=torch.long)
-        self.sampler: NegativeSampler = sampler
+        self.user_ids = torch.tensor(user_ids, dtype=torch.long)
+        self.item_ids = torch.tensor(item_ids, dtype=torch.long)
+
+        self.sampler = sampler
+        self.num_negatives = num_negatives
 
     def __len__(self) -> int:
-        """Return the number of user-item interaction pairs."""
+        """Return number of interactions."""
         return len(self.user_ids)
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
-        """Return a triplet of user, positive item, and negative items.
+        """Return a training sample.
 
         Args:
-            idx: Index of the sample to retrieve.
+            idx: Index of sample.
 
         Returns:
-            Dictionary with 'user_id', 'pos_item', and 'neg_item' tensors.
+            Dictionary containing:
+                - user_id: (1,)
+                - pos_item: (1,)
+                - neg_items: (num_negatives,)
         """
-        user = self.user_ids[idx]
-        pos = self.product_ids[idx]
-        neg = self.sampler.sample_popularity(user.item())
+        user = int(self.user_ids[idx])
+        pos = int(self.item_ids[idx])
+
+        negs = self.sampler.sample(user, self.num_negatives)
+
         return {
-            "user_id": user,
-            "pos_item": pos,
-            "neg_item": torch.tensor(neg, dtype=torch.long),
+            "user_id": torch.tensor(user, dtype=torch.long),
+            "pos_item": torch.tensor(pos, dtype=torch.long),
+            "neg_items": torch.tensor(negs, dtype=torch.long),
         }

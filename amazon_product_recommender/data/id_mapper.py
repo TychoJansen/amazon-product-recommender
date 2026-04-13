@@ -40,10 +40,9 @@ class IdMapper:
         self.product2idx = {p: i for i, p in enumerate(products)}
 
         # Add special <UNK> token for unseen IDs during inference
+        # These tokens are NOT used during training, only during inference
         self.unk_user_id = len(self.user2idx)
         self.unk_product_id = len(self.product2idx)
-        self.user2idx["<UNK>"] = self.unk_user_id
-        self.product2idx["<UNK>"] = self.unk_product_id
 
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
         """Apply learned mappings to transform IDs to numeric indices.

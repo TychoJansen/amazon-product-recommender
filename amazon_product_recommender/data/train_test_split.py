@@ -13,7 +13,7 @@ import pandas as pd
 
 def train_test_split(
     df: pd.DataFrame,
-    strategy: Literal["leave_last_k", "datetime_split"] = "leave_last_k",
+    strategy: Literal["leave_k_out", "datetime_split"] = "leave_k_out",
     k: int = 1,
     datetime_col: str = "time",
     threshold: float = 0.8,
