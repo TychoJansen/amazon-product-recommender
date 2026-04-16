@@ -1,117 +1,95 @@
-"""Training loop for the two-tower recommendation model.
+"""Trainer for two-tower recommendation models with BPR loss.
 
-This module provides the Trainer class for orchestrating model training with
-BPR loss and Adam optimization, including support for mixed precision training.
+Implements the training loop for the two-tower model using Bayesian Personalized
+Ranking (BPR) loss with support for gradient clipping and learning rate scheduling.
 """
 
 import logging
+from typing import Any
 
 import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader
 from tqdm import tqdm
-from training.loss import BPRLoss
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 
 
 class Trainer:
-    """Train a recommendation model using BPR loss.
+    """Trainer for two-tower model with BPR loss.
 
-    Handles the training loop, optimizer updates, and loss computation for
-    the two-tower embedding model with optional mixed precision training.
+    Handles training iterations, gradient updates, and metric logging.
     """
 
     def __init__(
         self,
-        model: nn.Module,
+        model: torch.nn.Module,
+        loss_fn: Any,
+        device: str = "cuda",
         lr: float = 1e-3,
-        device: str = "cpu",
-        use_amp: bool = True,
+        weight_decay: float = 1e-5,
+        grad_clip: float = 1.0,
     ) -> None:
         """Initialize the trainer.
 
         Args:
-            model: PyTorch recommendation model.
-            lr: Learning rate for optimizer. Default is 1e-3.
-            device: Device to train on ('cpu' or 'cuda'). Default is 'cpu'.
-            use_amp: Enable mixed precision training (GPU only). Default is True.
+            model: PyTorch model to train.
+            loss_fn: Loss function to use.
+            device: Device to use ("cuda" or "cpu"). Defaults to "cuda".
+            lr: Learning rate for optimizer. Defaults to 1e-3.
+            weight_decay: Weight decay for AdamW. Defaults to 1e-5.
+            grad_clip: Gradient clipping threshold. Defaults to 1.0.
         """
-        self.device: torch.device = torch.device(device)
-        self.model: nn.Module = model.to(self.device)
+        self.model = model.to(device)
+        self.device = device
+        self.loss_fn = loss_fn
+        self.grad_clip = grad_clip
 
-        self.optimizer: torch.optim.Adam = torch.optim.Adam(
-            self.model.parameters(),
-            lr=lr,
-            weight_decay=1e-5,
-        )
+        self.optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
-        self.criterion: BPRLoss = BPRLoss()
-
-        self.use_amp: bool = use_amp and self.device.type == "cuda"
-        self.scaler: torch.amp.GradScaler = torch.amp.GradScaler() if self.use_amp else None
-
-    def train_epoch(self, dataloader: DataLoader, epoch: int) -> float:
-        """Execute one training epoch.
+    def train_epoch(self, loader: torch.utils.data.DataLoader) -> float:
+        """Run a single training epoch.
 
         Args:
-            dataloader: PyTorch DataLoader for the training data.
-            epoch: Current epoch number for logging.
+            loader: DataLoader for training batches.
 
         Returns:
-            Average loss over all batches in the epoch.
+            Average loss over the epoch.
         """
         self.model.train()
         total_loss = 0.0
 
-        for batch in tqdm(dataloader, desc=f"Epoch {epoch}"):
+        for batch in tqdm(loader, desc="Training", leave=False):
 
-            user = batch["user_id"].to(self.device, non_blocking=True)
-            pos = batch["pos_item"].to(self.device, non_blocking=True)
-            neg = batch["neg_items"].to(self.device, non_blocking=True)
-            b, k = neg.shape
+            user_items = batch["user_items"].to(self.device)
+            pos_item = batch["pos_item"].to(self.device)
+            neg_item = batch["neg_item"].to(self.device)
 
-            user = user.repeat_interleave(k)
-            pos = pos.repeat_interleave(k)
-            neg = neg.view(-1)
+            user_vec = self.model.encode_user(user_items)
+            pos_vec = self.model.encode_item(pos_item)
+            neg_vec = self.model.encode_item(neg_item)
 
+            # Compute loss
+            loss = self.loss_fn(user_vec, pos_vec, neg_vec)
+
+            # Backpropagation
             self.optimizer.zero_grad()
+            loss.backward()
 
-            # -------------------------
-            # Forward pass (AMP optional)
-            # -------------------------
-            self.optimizer.zero_grad()
+            # Gradient clipping
+            if self.grad_clip:
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
 
-            if self.use_amp:
-                with torch.amp.autocast(device_type="cuda"):
-                    user_vec, pos_vec, neg_vec = self.model(user, pos, neg)
-                    loss = self.criterion(user_vec, pos_vec, neg_vec)
-
-                self.scaler.scale(loss).backward()
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
-
-            else:
-                user_vec, pos_vec, neg_vec = self.model(user, pos, neg)
-                loss = self.criterion(user_vec, pos_vec, neg_vec)
-
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-                self.optimizer.step()
+            self.optimizer.step()
 
             total_loss += loss.item()
-        return total_loss / len(dataloader)
 
-    def train(self, dataloader: DataLoader, epochs: int = 2) -> None:
-        """Execute full training for multiple epochs.
+        return total_loss / len(loader)
+
+    def train(self, loader: torch.utils.data.DataLoader, epochs: int = 5) -> None:
+        """Run full training loop for specified number of epochs.
 
         Args:
-            dataloader: PyTorch DataLoader for the training data.
-            epochs: Number of training epochs. Default is 2.
+            loader: DataLoader for training batches.
+            epochs: Number of epochs to train. Defaults to 5.
         """
-        progress = 1
         for epoch in range(epochs):
-            loss = self.train_epoch(dataloader, progress)
-            progress += 1
+            loss = self.train_epoch(loader)
+
             logging.info(f"Epoch {epoch+1}/{epochs} | Loss: {loss:.4f}")

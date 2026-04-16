@@ -1,10 +1,8 @@
-"""Two-tower embedding model for recommendation systems.
+"""Two-tower neural network architecture for recommendation systems.
 
-This module implements the two-tower architecture where user and item embeddings
-are learned separately and compared using cosine similarity for ranking.
+Implements a two-tower model with separate user and item towers that learn
+to encode user history and items into a shared embedding space for scoring.
 """
-
-from typing import Tuple
 
 import torch
 import torch.nn as nn
@@ -12,96 +10,82 @@ import torch.nn.functional as F
 
 
 class TwoTowerModel(nn.Module):
-    """Dual embedding tower model for user-item recommendation.
+    """Two-tower model with user and item towers for collaborative filtering.
 
-    Maintains separate embedding spaces for users and products, normalizing
-    embeddings for cosine similarity-based ranking.
+    The user tower aggregates user's historical item embeddings into a user vector,
+    while the item tower projects individual item embeddings. Both are normalized
+    in the same embedding space.
     """
 
-    def __init__(self, num_users: int, num_products: int, embedding_dim: int = 64) -> None:
+    def __init__(self, embedding_dim: int, hidden_dim: int = 128) -> None:
         """Initialize the two-tower model.
 
         Args:
-            num_users: Total number of unique users.
-            num_products: Total number of unique products.
-            embedding_dim: Dimension of the embedding vectors. Default is 64.
+            embedding_dim: Dimension of input item embeddings.
+            hidden_dim: Hidden dimension for MLP layers. Defaults to 128.
         """
         super().__init__()
 
-        self.user_embedding = nn.Embedding(num_users, embedding_dim)
-        self.product_embedding = nn.Embedding(num_products, embedding_dim)
-
+        # USER tower processes aggregated item embeddings
         self.user_mlp = nn.Sequential(
-            nn.Linear(embedding_dim, 128),
+            nn.Linear(embedding_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(128, embedding_dim),
+            nn.Linear(hidden_dim, embedding_dim),
         )
 
+        # ITEM tower projects individual items
         self.item_mlp = nn.Sequential(
-            nn.Linear(embedding_dim, 128),
+            nn.Linear(embedding_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(128, embedding_dim),
+            nn.Linear(hidden_dim, embedding_dim),
         )
 
-    def encode_users(self, user_ids: torch.Tensor) -> torch.Tensor:
-        """Encode user IDs to embedding vectors.
+    def encode_user(self, user_item_embeddings: torch.Tensor) -> torch.Tensor:
+        """Encode user from aggregated item embeddings.
+
+        Averages item embeddings from user history, excluding padded zeros,
+        then projects through MLP and normalizes.
 
         Args:
-            user_ids: Tensor of user indices.
+            user_item_embeddings: Tensor of shape (batch_size, num_items, embedding_dim).
 
         Returns:
-            User embedding vectors of shape (batch_size, embedding_dim).
+            Normalized user vectors of shape (batch_size, embedding_dim).
         """
-        x = self.user_embedding(user_ids)
-        return self.user_mlp(x)
+        # Avoid division by padded zeros
+        mask = (user_item_embeddings.abs().sum(dim=2) > 0).float()
 
-    def encode_items(self, item_ids: torch.Tensor) -> torch.Tensor:
-        """Encode product IDs to embedding vectors.
+        summed = (user_item_embeddings * mask.unsqueeze(-1)).sum(dim=1)
+        counts = mask.sum(dim=1).clamp(min=1).unsqueeze(1)
+
+        user_vec = summed / counts
+        user_vec = self.user_mlp(user_vec)
+        return F.normalize(user_vec, dim=1)
+
+    def encode_item(self, item_embeddings: torch.Tensor) -> torch.Tensor:
+        """Encode item embeddings through the item tower.
+
+        Projects item embeddings through MLP and normalizes.
 
         Args:
-            item_ids: Tensor of product indices.
+            item_embeddings: Tensor of shape (batch_size, embedding_dim) or (embedding_dim,).
 
         Returns:
-            Product embedding vectors of shape (batch_size, embedding_dim).
+            Normalized item vectors of same shape as input.
         """
-        x = self.product_embedding(item_ids)
-        return self.item_mlp(x)
+        x = self.item_mlp(item_embeddings)
+        return F.normalize(x, dim=1)
 
-    def forward(
-        self, user_ids: torch.Tensor, pos_item_ids: torch.Tensor, neg_item_ids: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Compute embeddings for user-positive-negative triplets.
+    def forward(self, user_item_embeddings: torch.Tensor, item_embeddings: torch.Tensor) -> torch.Tensor:
+        """Compute similarity scores between users and items.
 
         Args:
-            user_ids: Tensor of user indices.
-            pos_item_ids: Tensor of positive product indices.
-            neg_item_ids: Tensor of negative product indices.
+            user_item_embeddings: User's historical item embeddings, shape (batch_size, num_items, embedding_dim).
+            item_embeddings: Candidate item embeddings, shape (batch_size, embedding_dim).
 
         Returns:
-            Tuple of normalized (user_vec, pos_vec, neg_vec) embeddings.
+            Similarity scores, shape (batch_size,).
         """
-        user_vec = self.encode_users(user_ids)
-        pos_vec = self.encode_items(pos_item_ids)
-        neg_vec = self.encode_items(neg_item_ids)
-
-        # Normalize embeddings for cosine similarity
-        user_vec = F.normalize(user_vec, dim=1)
-        pos_vec = F.normalize(pos_vec, dim=1)
-        neg_vec = F.normalize(neg_vec, dim=1)
-
-        return user_vec, pos_vec, neg_vec
-
-    def predict(self, user_ids: torch.Tensor, item_ids: torch.Tensor) -> torch.Tensor:
-        """Predict relevance scores for user-item pairs.
-
-        Args:
-            user_ids: Tensor of user indices.
-            item_ids: Tensor of product indices.
-
-        Returns:
-            Relevance score for each user-item pair.
-        """
-        user_vec = F.normalize(self.encode_users(user_ids), dim=1)
-        item_vec = F.normalize(self.encode_items(item_ids), dim=1)
-
+        user_vec = self.encode_user(user_item_embeddings)
+        item_vec = self.encode_item(item_embeddings)
         return (user_vec * item_vec).sum(dim=1)
