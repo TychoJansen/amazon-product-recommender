@@ -11,24 +11,24 @@ import pandas as pd
 
 
 class IdMapper:
-    """Map user and product IDs to zero-indexed numeric values.
+    """Maps raw user and product IDs to contiguous integer indices.
 
-    Supports mapping of unknown IDs to a special <UNK> token for handling
-    unseen users/products during inference.
+    Supports an <UNK> index for unseen users/products at inference time.
     """
 
     def __init__(self) -> None:
         """Initialize the ID mapper with empty mappings."""
         self.user2idx: Dict[str, int] = {}
         self.product2idx: Dict[str, int] = {}
+
+        self.idx2user: Dict[int, str] = {}
+        self.idx2product: Dict[int, str] = {}
+
         self.unk_user_id: int = -1
         self.unk_product_id: int = -1
 
     def fit(self, df: pd.DataFrame) -> None:
-        """Learn the ID mappings from the input DataFrame.
-
-        Creates mappings for all unique user and product IDs. Initializes
-        special <UNK> tokens for unseen IDs.
+        """Fit mappings from DataFrame.
 
         Args:
             df: DataFrame with 'userid' and 'productid' columns.
@@ -39,21 +39,22 @@ class IdMapper:
         self.user2idx = {u: i for i, u in enumerate(users)}
         self.product2idx = {p: i for i, p in enumerate(products)}
 
-        # Add special <UNK> token for unseen IDs during inference
-        # These tokens are NOT used during training, only during inference
+        self.idx2user = {i: u for u, i in self.user2idx.items()}
+        self.idx2product = {i: p for p, i in self.product2idx.items()}
+
         self.unk_user_id = len(self.user2idx)
         self.unk_product_id = len(self.product2idx)
 
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Apply learned mappings to transform IDs to numeric indices.
+        """Transform raw IDs into integer indices.
 
-        Maps unknown IDs to the <UNK> token index.
+        Unknown IDs are mapped to <UNK> indices.
 
         Args:
-            df: DataFrame with 'userid' and 'productid' columns to transform.
+            df: Input DataFrame with 'userid' and 'productid' columns.
 
         Returns:
-            DataFrame with new 'user_idx' and 'product_idx' columns.
+            DataFrame with added 'user_idx' and 'product_idx' columns.
         """
         df = df.copy()
 
@@ -65,15 +66,12 @@ class IdMapper:
 
     @staticmethod
     def build_user_product_dict(df: pd.DataFrame) -> Dict[int, Set[int]]:
-        """Build a dictionary mapping user indices to sets of product indices.
-
-        Used for negative sampling to avoid recommending already-interacted items.
+        """Build user → interacted products mapping.
 
         Args:
             df: DataFrame with 'user_idx' and 'product_idx' columns.
 
         Returns:
-            Dictionary where keys are user indices and values are sets of
-            product indices that the user has interacted with.
+            Dictionary mapping user_idx → set(product_idx).
         """
         return df.groupby("user_idx")["product_idx"].agg(set).to_dict()
