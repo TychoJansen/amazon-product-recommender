@@ -60,30 +60,33 @@ def leave_k_out_split(
     - k > 1 → K-last evaluation split
 
     Args:
-        df: DataFrame with columns [user_idx, product_idx, datetime_col]
+        df: DataFrame with columns [userid, productid, datetime_col]
         k: number of last interactions to use as test set
         datetime_col: column used for ordering interactions
 
     Returns:
         train_df: remaining interactions
-        test_dict: user -> set of held-out items
+        test_df: held-out interactions
     """
-    df = df.sort_values(["user_idx", datetime_col], kind="mergesort")
+    df = df.copy()
+    if not pd.api.types.is_numeric_dtype(df[datetime_col]):
+        df[datetime_col] = pd.to_datetime(df[datetime_col], errors="coerce")
+
+    df = df.sort_values(["userid", datetime_col], kind="mergesort")
 
     # Rank interactions per user (0 = oldest) and calculate user sizes
-    df["_rank"] = df.groupby("user_idx").cumcount()
-    user_sizes = df.groupby("user_idx")["_rank"].transform("max") + 1
+    df["_rank"] = df.groupby("userid").cumcount()
+    user_sizes = df.groupby("userid")["_rank"].transform("max") + 1
 
     # Last k interactions per user
     test_mask = df["_rank"] >= (user_sizes - k)
 
-    test_df = df[test_mask]
-    train_df = df[~test_mask]
-    test_dict = test_df.groupby("user_idx")["product_idx"].apply(lambda x: set(map(int, x))).to_dict()
+    test_df = df[test_mask].drop(columns=["_rank"])
+    train_df = df[~test_mask].drop(columns=["_rank"])
 
     return (
-        train_df[["user_idx", "product_idx"]],
-        test_dict,
+        train_df,
+        test_df,
     )
 
 
@@ -94,23 +97,23 @@ def datetime_split(df: pd.DataFrame, datetime_col: str, threshold: float) -> Tup
     go to the test set.
 
     Args:
-        df: DataFrame with columns [user_idx, product_idx, datetime_col]
+        df: DataFrame with columns [userid, productid, datetime_col]
         datetime_col: column used for splitting interactions
         threshold: float between 0 and 1 to determine the cutoff quantile
 
     Returns:
         train_df: interactions before the cutoff
-        test_dict: user -> set of items interacted with after the cutoff
+        test_df: interactions after the cutoff
     """
+    df = df.copy()
     if not pd.api.types.is_numeric_dtype(df[datetime_col]):
         df[datetime_col] = pd.to_datetime(df[datetime_col], errors="coerce")
 
     cutoff = df[datetime_col].quantile(threshold)
     train_df = df[df[datetime_col] <= cutoff]
     test_df = df[df[datetime_col] > cutoff]
-    test_dict = test_df.groupby("user_idx")["product_idx"].apply(lambda x: set(map(int, x))).to_dict()
 
     return (
-        train_df[["user_idx", "product_idx"]],
-        test_dict,
+        train_df,
+        test_df,
     )

@@ -1,10 +1,7 @@
-r"""DataProcessor: A configurable class for preprocessing tabular data.
+r"""Base data processor for tabular data cleaning and preprocessing.
 
-This class performs basic data cleaning, handles missing values, drops unused columns, preprocesses
-string and datetime columns, lowers column names, and removes duplicates when configured.
-
-Designed for flexible ETL workflows, with all options controlled via the config
-dictionary or JSON file.
+Provides configurable preprocessing pipeline for data cleaning, missing value
+handling, column selection, string/datetime processing, and deduplication.
 
 Config example:
 {
@@ -20,19 +17,20 @@ Config example:
 }
 """
 
+import functools
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 import pandas as pd
 
 
-class DataProcessor:
+class BasePreProcessor:
     """Process tabular data using a configuration dictionary."""
 
     REQUIRED_KEYS = ["use_cols", "patterns", "fillna", "drop_duplicates"]
 
     def __init__(self, df: pd.DataFrame, config: Dict[str, Any]) -> None:
-        """Initialize the DataProcessor.
+        """Initialize the data processor.
 
         Args:
             df: The pandas DataFrame to preprocess.
@@ -48,23 +46,44 @@ class DataProcessor:
             if key not in self.config:
                 raise KeyError(f"Missing key in config: {key}")
 
-    def preprocess(self) -> pd.DataFrame:
-        """Run the preprocessing pipeline and return the processed DataFrame."""
-        self._fill_missing_values()
-        self._drop_unused_columns()
-        self._preprocess_string_cols()
-        self._convert_datetime_columns()
-        self._sort_by_time()
-        self._lowercase_col_names()
-        self._drop_duplicates()
-        return self.df
+    @staticmethod
+    def basic_preprocessing(method: Callable) -> Callable:
+        """Build a decorator to run basic preprocessing steps in order.
+
+        Applies standard sequence: fill missing values, drop unused columns,
+        clean strings, convert datetimes, sort by time, lowercase column names,
+        and drop duplicates.
+
+        Args:
+            method: Method to wrap.
+
+        Returns:
+            Wrapped method that runs preprocessing before the original method.
+        """
+
+        @functools.wraps(method)
+        def wrapper(self: "BasePreProcessor", *args: Any, **kwargs: Any) -> Any:
+            self._fill_missing_values()
+            self._drop_unused_columns()
+            self._preprocess_string_cols()
+            self._convert_datetime_columns()
+            self._sort_by_time()
+            self._lowercase_col_names()
+            self._drop_duplicates()
+            return method(self, *args, **kwargs)
+
+        return wrapper
 
     def get_data(self) -> Optional[pd.DataFrame]:
-        """Return the processed pandas DataFrame."""
+        """Return the processed pandas DataFrame.
+
+        Returns:
+            Processed DataFrame or None if not yet processed.
+        """
         return self.df
 
     def _drop_unused_columns(self) -> None:
-        """Drop columns that are not specified in the configuration's use_cols."""
+        """Drop columns not specified in the configuration's use_cols."""
         if self.df is None:
             return
         use_cols = self.config.get("use_cols", [])
@@ -81,7 +100,7 @@ class DataProcessor:
                 self.df[col] = self.df[col].fillna(value)
 
     def _preprocess_string_cols(self) -> None:
-        """Preprocess string columns by cleaning whitespace, quotes, and parentheses."""
+        """Preprocess string columns by cleaning whitespace, quotes, and special characters."""
         patterns = self.config["patterns"]
 
         compiled_patterns = [
@@ -117,15 +136,15 @@ class DataProcessor:
                 continue
 
             series = self.df[col]
-            # numeric (unix timestamp)
+
+            # Numeric (Unix timestamp)
             if pd.api.types.is_numeric_dtype(series):
-                # auto-detect seconds vs milliseconds
+                # Auto-detect seconds vs milliseconds
                 if series.max() > 1e12:
                     self.df[col] = pd.to_datetime(series, unit="ms", errors="coerce")
                 else:
                     self.df[col] = pd.to_datetime(series, unit="s", errors="coerce")
-
-            # string / object
+            # String / object
             else:
                 self.df[col] = pd.to_datetime(series, errors="coerce")
 
@@ -133,6 +152,7 @@ class DataProcessor:
         """Sort the DataFrame by the configured datetime column."""
         sort_col = self.config.get("sort_col", None)
         datetime_cols = self.config.get("datetime_cols", None)
+
         if sort_col:
             self.df = self.df.sort_values(sort_col)
         elif datetime_cols and len(datetime_cols) == 1:
@@ -145,7 +165,7 @@ class DataProcessor:
         self.df.columns = [col.lower() for col in self.df.columns]
 
     def _drop_duplicates(self) -> None:
-        """Drop duplicate rows if the configuration enables duplicate removal."""
+        """Drop duplicate rows if the configuration enables removal."""
         if self.df is None:
             return
         if self.config.get("drop_duplicates", False):

@@ -13,22 +13,46 @@ class BPRLoss(nn.Module):
     """Bayesian Personalized Ranking loss for contrastive learning.
 
     Computes pairwise ranking loss that encourages positive items to have
-    higher scores than negative items.
+    higher scores than negative items. Optionally applies L2 regularization
+    to prevent overfitting.
     """
 
-    def forward(self, user_vec: torch.Tensor, pos_vec: torch.Tensor, neg_vec: torch.Tensor) -> torch.Tensor:
-        """Compute BPR loss for a batch of triplets.
+    def __init__(self, reg_weight: float = 0.0) -> None:
+        """Initialize the BPR loss function.
 
         Args:
-            user_vec: User embedding vectors of shape (batch_size, embedding_dim).
-            pos_vec: Positive item embedding vectors of shape (batch_size, embedding_dim).
-            neg_vec: Negative item embedding vectors of shape (batch_size, embedding_dim).
+            reg_weight: L2 regularization weight for embedding vectors.
+                Defaults to 0.0 (no regularization).
+        """
+        super().__init__()
+        self.reg_weight = reg_weight
+
+    def forward(self, user_vec: torch.Tensor, pos_vec: torch.Tensor, neg_vec: torch.Tensor) -> torch.Tensor:
+        """Compute BPR loss.
+
+        Computes pairwise ranking loss using softplus activation.
+        Loss = -log(sigmoid(score(user, pos) - score(user, neg)))
+
+        Optionally adds L2 regularization on embedding norms.
+
+        Args:
+            user_vec: User embedding vectors, shape (batch_size, embedding_dim).
+            pos_vec: Positive item embedding vectors, shape (batch_size, embedding_dim).
+            neg_vec: Negative item embedding vectors, shape (batch_size, embedding_dim).
 
         Returns:
-            Scalar BPR loss value.
+            Scalar loss value (mean over batch).
         """
         pos_score = (user_vec * pos_vec).sum(dim=1)
         neg_score = (user_vec * neg_vec).sum(dim=1)
 
-        loss = F.softplus(-(pos_score - neg_score))
-        return loss.mean()
+        loss = F.softplus(-(pos_score - neg_score)).mean()
+
+        # Optional L2 regularization
+        if self.reg_weight > 0:
+            reg = (
+                user_vec.norm(2, dim=1).pow(2) + pos_vec.norm(2, dim=1).pow(2) + neg_vec.norm(2, dim=1).pow(2)
+            ).mean()
+            loss = loss + self.reg_weight * reg
+
+        return loss

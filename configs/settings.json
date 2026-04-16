@@ -1,0 +1,35 @@
+{
+    "seed" : 42,
+    "summary_weight" : 1,
+    "datetime_col" : "time",
+    "train_test_split": {
+        "strategy" : "leave_k_out",
+        "k" : 5
+    },
+    "config_dataset" : {
+        "negative_sampling" : {
+            "attemps" : 10,
+            "pop_negative_prob" : 0.7
+        },
+        "max_items_per_user" : 20
+    },
+    "text_aggregator" : {
+        "max_reviews" : 20,
+        "max_chars" : 2000
+    },
+    "encoder_name": "sentence-transformers/all-MiniLM-L6-v2",
+    "product_embeddings_paths" : {
+        "load_path" : "product_embeddings.pt",
+        "save_path" : "product_embeddings.pt"
+    },
+    "hidden_dim" : 256,
+    "trainer" : {
+        "batch_size": 256,
+        "shuffle" : true,
+        "num_workers" : 2,
+        "epochs": 2,
+        "learning_rate" : 1e-3,
+        "loss_reg_weight" : 1e-4,
+        "top_k_recommendations" : 10
+    }
+}
